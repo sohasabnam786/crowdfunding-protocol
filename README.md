@@ -2,15 +2,17 @@
 
 A state-of-the-art, responsive decentralized crowdfunding platform built with a Next.js frontend integrated with a **Soroban Smart Contract** on the **Stellar Testnet**. This platform enables anyone to launch on-chain fundraising campaigns, receive XLM donations from across the globe, and withdraw funds or claim refunds—all governed transparently and immutably by Soroban smart contracts.
 
+🌐 **Live Deployment**: [https://crowdfunding-protocol.vercel.app/](https://crowdfunding-protocol.vercel.app/)
+
 ---
 
 ## 📸 Screenshots
 
 > Connect your Freighter wallet, browse campaigns, and track live on-chain activity—all from one dashboard.
 
-| Home | Campaigns | Campaign Detail |
-|---|---|---|
-| Landing page with stats & feature cards | Browse & filter all campaigns | Donate, withdraw, or refund per campaign |
+| Dashboard | Stellar Expert Explorer |
+|---|---|
+| ![Dashboard](photos/dashboard.png) | ![Stellar Expert Explorer](photos/steller-expert.png) |
 
 ---
 
