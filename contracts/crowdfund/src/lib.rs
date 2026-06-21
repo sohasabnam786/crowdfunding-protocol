@@ -6,9 +6,8 @@ mod storage;
 mod error;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token,
-    Address, Env, String, Symbol, Vec, Map,
-    auth::Context,
+    contract, contractimpl, token,
+    Address, Env, String, Vec,
 };
 
 use types::{Campaign, Donation, CampaignStatus, DataKey};
@@ -116,7 +115,7 @@ impl CrowdfundContract {
             .extend_ttl(&DataKey::Donations(campaign_id), 100_000, 100_000);
 
         // Emit event
-        events::campaign_created(&env, campaign_id, &creator, &title, goal, deadline);
+        events::campaign_created(&env, campaign_id, &creator, title, goal, deadline);
 
         Ok(campaign_id)
     }
@@ -159,7 +158,7 @@ impl CrowdfundContract {
         }
 
         // Transfer XLM from donor to contract
-        let native_token = token::StellarAssetClient::new(&env, &get_native_asset(&env));
+        let native_token = token::Client::new(&env, &get_native_asset(&env));
         native_token.transfer(&donor, &env.current_contract_address(), &amount);
 
         // Update raised amount
@@ -245,7 +244,7 @@ impl CrowdfundContract {
         }
 
         // Transfer funds to creator
-        let native_token = token::StellarAssetClient::new(&env, &get_native_asset(&env));
+        let native_token = token::Client::new(&env, &get_native_asset(&env));
         native_token.transfer(&env.current_contract_address(), &creator, &amount);
 
         // Mark as withdrawn
@@ -312,7 +311,7 @@ impl CrowdfundContract {
         }
 
         // Transfer refund
-        let native_token = token::StellarAssetClient::new(&env, &get_native_asset(&env));
+        let native_token = token::Client::new(&env, &get_native_asset(&env));
         native_token.transfer(
             &env.current_contract_address(),
             &donor,

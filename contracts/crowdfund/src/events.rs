@@ -1,11 +1,11 @@
-use soroban_sdk::{Address, Env, String, Symbol, symbol_short};
+use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Emitted when a new campaign is created.
 pub fn campaign_created(
     env: &Env,
     campaign_id: u32,
     creator: &Address,
-    title: &String,
+    title: String,
     goal: i128,
     deadline: u64,
 ) {

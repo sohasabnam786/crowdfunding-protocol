@@ -1,0 +1,1 @@
+D:\crowdfunding-protocol\target\wasm32-unknown-unknown\release\crowdfund.wasm: D:\crowdfunding-protocol\contracts\crowdfund\src\error.rs D:\crowdfunding-protocol\contracts\crowdfund\src\events.rs D:\crowdfunding-protocol\contracts\crowdfund\src\lib.rs D:\crowdfunding-protocol\contracts\crowdfund\src\storage.rs D:\crowdfunding-protocol\contracts\crowdfund\src\types.rs
