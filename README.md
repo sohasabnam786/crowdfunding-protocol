@@ -20,8 +20,8 @@ A state-of-the-art, responsive decentralized crowdfunding platform built with a 
 
 | Resource | Value / Link |
 |---|---|
-| **Contract ID** | `CDD2XL5ZSING7YMTJNPE76KJG5WWRUDRZUAJV7WH6TCYSDEC5HSRP53W` |
-| **Stellar Expert Explorer** | [View Contract on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDD2XL5ZSING7YMTJNPE76KJG5WWRUDRZUAJV7WH6TCYSDEC5HSRP53W) |
+| **Contract ID** | `CD6P3Z3FYISWUHBJ2PZYBUW7FYPGCTUTNBTHVE3T4XJ3KKMLKWF4CKPY` |
+| **Stellar Expert Explorer** | [View Contract on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CD6P3Z3FYISWUHBJ2PZYBUW7FYPGCTUTNBTHVE3T4XJ3KKMLKWF4CKPY) |
 | **Deployer Wallet Address** | `GDOJIEIHOEUCXZMHGVZOA2V2WZMP7QVXAV42M76QNDKQYEPJDO7V3ARX` |
 | **Network** | Stellar Testnet |
 | **RPC URL** | `https://soroban-testnet.stellar.org` |
