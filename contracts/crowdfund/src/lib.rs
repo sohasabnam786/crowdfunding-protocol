@@ -535,7 +535,7 @@ mod test {
     }
 
     fn setup_contract(env: &Env) -> (CrowdfundContractClient<'_>, Address) {
-        let contract_id = env.register_contract(None, CrowdfundContract);
+        let contract_id = env.register(CrowdfundContract, ());
         let client = CrowdfundContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
         client.initialize(&admin);
@@ -546,7 +546,7 @@ mod test {
     #[test]
     fn test_initialize() {
         let env = create_env();
-        let contract_id = env.register_contract(None, CrowdfundContract);
+        let contract_id = env.register(CrowdfundContract, ());
         let client = CrowdfundContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         client.initialize(&admin);
