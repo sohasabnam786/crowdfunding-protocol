@@ -45,12 +45,12 @@ export default function RootLayout({
           <Sidebar />
 
           {/* Main content area */}
-          <div className="lg:pl-64 min-h-screen flex flex-col">
+          <div className="lg:pl-64 min-h-screen flex flex-col bg-gradient-to-b from-black/40 via-black/20 to-black/40">
             {/* Navbar */}
             <Navbar />
 
             {/* Page content */}
-            <main className="flex-1 px-4 md:px-6 py-6 max-w-screen-2xl mx-auto w-full">
+            <main className="flex-1 px-4 md:px-8 py-8 max-w-screen-2xl mx-auto w-full">
               {children}
             </main>
           </div>
