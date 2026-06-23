@@ -130,7 +130,7 @@ export default function CampaignsPage() {
           <div className="space-y-1">
             <h3 className="font-bold text-lg">No Campaigns Found</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              We couldn't find any campaigns matching your filters. Try adjusting your search query or creating a new campaign.
+              We couldn&apos;t find any campaigns matching your filters. Try adjusting your search query or creating a new campaign.
             </p>
           </div>
         </div>

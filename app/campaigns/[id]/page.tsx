@@ -88,7 +88,7 @@ export default function CampaignDetailPage() {
         <div className="space-y-2">
           <h2 className="text-xl font-bold">Campaign Not Found</h2>
           <p className="text-muted-foreground text-sm">
-            We couldn't retrieve the details for Campaign #{campaignId}. It might not exist, or there might be a network issue.
+            We couldn&apos;t retrieve the details for Campaign #{campaignId}. It might not exist, or there might be a network issue.
           </p>
         </div>
         <Link href="/campaigns" className="btn-ghost inline-flex justify-center">

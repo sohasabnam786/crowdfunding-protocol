@@ -10,6 +10,9 @@ import {
   Network,
   Loader2,
   AlertCircle,
+  Sparkles,
+  TrendingUp,
+  Coins,
 } from "lucide-react";
 import { useState } from "react";
 import { useWallet } from "@/hooks/useWallet";
@@ -23,13 +26,19 @@ import { STELLAR_CONFIG, DEPLOYER_ADDRESS } from "@/lib/stellar/config";
 import { useTransactionStore } from "@/store/transaction-store";
 import { explorerTxUrl } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import type { Metadata } from "next";
+
+// ── Helper: format CRWD (stroops → CRWD) ─────────────────────────────────────
+function formatCrwd(stroops: number | null): string {
+  if (stroops === null) return "—";
+  return (stroops / 10_000_000).toFixed(2);
+}
 
 export default function DashboardPage() {
   const {
     isConnected,
     address,
     balance,
+    rewardBalance,
     network,
     isConnecting,
     error,
@@ -185,8 +194,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Balance + Network info grid */}
-          <div className="grid md:grid-cols-2 gap-4">
+          {/* Balance grid: XLM + CRWD Reward + Network Info */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* XLM Balance */}
             <div className="glass-card p-6 space-y-3">
               <div className="flex items-center justify-between">
@@ -211,6 +220,29 @@ export default function DashboardPage() {
                 {balance ? parseFloat(balance).toFixed(4) : "—"}
               </p>
               <p className="text-sm text-muted-foreground">XLM</p>
+            </div>
+
+            {/* CRWD Reward Token Balance ── New inter-contract feature */}
+            <div className="glass-card p-6 space-y-3 relative overflow-hidden">
+              {/* Background glow */}
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-fuchsia-500/5 pointer-events-none" />
+              <div className="flex items-center justify-between relative">
+                <p className="text-sm font-medium text-muted-foreground">
+                  CRWD Rewards
+                </p>
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-violet-500/10 border border-violet-500/20">
+                  <Sparkles className="w-3 h-3 text-violet-400" />
+                  <span className="text-[10px] text-violet-400 font-semibold">Earned</span>
+                </div>
+              </div>
+              <p className="text-4xl font-black relative"
+                style={{ background: "linear-gradient(135deg, hsl(270,70%,70%), hsl(300,70%,65%))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                {formatCrwd(rewardBalance)}
+              </p>
+              <p className="text-xs text-muted-foreground relative leading-relaxed">
+                CRWD — earned via donations.<br />
+                <span className="text-violet-400/80">1 CRWD = 1 XLM donated</span>
+              </p>
             </div>
 
             {/* Network Info */}

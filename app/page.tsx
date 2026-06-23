@@ -120,7 +120,7 @@ export default function HomePage() {
             Why CrowdFund Protocol?
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
-            Built on Stellar's battle-tested infrastructure for speed, security,
+            Built on Stellar&apos;s battle-tested infrastructure for speed, security,
             and accessibility.
           </p>
         </div>

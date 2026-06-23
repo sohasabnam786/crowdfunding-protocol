@@ -10,6 +10,7 @@ export interface StellarConfig {
   networkPassphrase: string;
   horizonUrl: string;
   contractId: string;
+  rewardTokenId?: string;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

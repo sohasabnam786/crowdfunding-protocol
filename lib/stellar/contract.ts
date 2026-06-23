@@ -134,10 +134,12 @@ export async function submitTransaction(
  */
 async function simulateReadCall(
   functionName: string,
-  args: xdr.ScVal[]
+  args: xdr.ScVal[],
+  contractIdOverride?: string
 ): Promise<unknown> {
   const server = getRpcServer();
-  const contract = new Contract(STELLAR_CONFIG.contractId);
+  const contractIdToUse = contractIdOverride || STELLAR_CONFIG.contractId;
+  const contract = new Contract(contractIdToUse);
 
   // Use a dummy account for read-only calls
   // We use a well-known funded testnet account to load sequence numbers
@@ -301,6 +303,24 @@ export async function fetchXlmBalance(address: string): Promise<string> {
     return xlmBalance?.balance || "0";
   } catch {
     return "0";
+  }
+}
+
+/**
+ * Fetch the CRWD reward token balance for an address.
+ * Returns the raw stroop amount (divide by 10_000_000 for XLM-equivalent display).
+ */
+export async function fetchRewardBalance(address: string): Promise<number> {
+  if (!STELLAR_CONFIG.rewardTokenId) return 0;
+  try {
+    const raw = await simulateReadCall(
+      "balance_of",
+      [new Address(address).toScVal()],
+      STELLAR_CONFIG.rewardTokenId
+    );
+    return Number(raw) || 0;
+  } catch {
+    return 0;
   }
 }
 

@@ -8,11 +8,14 @@ import type { WalletState } from "@/types";
 
 interface WalletStore extends WalletState {
   walletId: string | null;
+  /** CRWD reward token balance (in stroops). Null = not yet fetched. */
+  rewardBalance: number | null;
 
   // Actions
   setConnected: (address: string, walletId: string) => void;
   setDisconnected: () => void;
   setBalance: (balance: string) => void;
+  setRewardBalance: (rewardBalance: number) => void;
   setConnecting: (isConnecting: boolean) => void;
   setError: (error: string | null) => void;
 }
@@ -26,6 +29,7 @@ export const useWalletStore = create<WalletStore>()(
       walletId: null,
       network: "testnet",
       balance: null,
+      rewardBalance: null,
       isConnecting: false,
       error: null,
 
@@ -46,11 +50,14 @@ export const useWalletStore = create<WalletStore>()(
           address: null,
           walletId: null,
           balance: null,
+          rewardBalance: null,
           error: null,
           isConnecting: false,
         }),
 
       setBalance: (balance) => set({ balance }),
+
+      setRewardBalance: (rewardBalance) => set({ rewardBalance }),
 
       setConnecting: (isConnecting) => set({ isConnecting }),
 

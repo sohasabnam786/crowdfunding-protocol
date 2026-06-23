@@ -1,11 +1,13 @@
 /**
- * deploy.js - Deploy the crowdfund Soroban contract to Stellar Testnet
- * Uses @stellar/stellar-sdk v13 + Horizon for TX polling
+ * deploy.js - Deploy both crowdfund and reward_token Soroban contracts to Stellar Testnet,
+ * initialize them, and link them on-chain.
+ * Uses @stellar/stellar-sdk v13 + Horizon for TX polling.
  */
 
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { execSync } = require("child_process");
 
 const sdk = require("@stellar/stellar-sdk");
 const {
@@ -18,6 +20,8 @@ const {
   StrKey,
   Horizon,
   Address,
+  Contract,
+  nativeToScVal,
 } = sdk;
 
 const { Server: RpcServer, Api, assembleTransaction } = sdk.rpc;
@@ -26,7 +30,16 @@ const RPC_URL = "https://soroban-testnet.stellar.org";
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
-const wasmPath = path.join(
+const rewardWasmPath = path.join(
+  __dirname,
+  "..",
+  "target",
+  "wasm32-unknown-unknown",
+  "release",
+  "reward_token.wasm"
+);
+
+const crowdfundWasmPath = path.join(
   __dirname,
   "..",
   "target",
@@ -62,61 +75,15 @@ async function waitForHorizonTx(hash, maxAttempts = 30) {
   throw new Error(`TX ${hash} timed out`);
 }
 
-/** Poll Soroban RPC until TX result available */
-async function waitForRpcTx(server, hash, maxAttempts = 40) {
-  for (let i = 0; i < maxAttempts; i++) {
-    await sleep(2000);
-    try {
-      const status = await server.getTransaction(hash);
-      if (status.status === "SUCCESS") return status;
-      if (status.status === "FAILED") throw new Error(`RPC TX failed: ${JSON.stringify(status)}`);
-      process.stdout.write(".");
-    } catch (e) {
-      if (e.message && (e.message.includes("Bad union") || e.message.includes("NOT_FOUND"))) {
-        process.stdout.write("~");
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error(`TX ${hash} RPC timeout`);
-}
-
-async function main() {
+/** Upload WASM file to Stellar Testnet and return its SHA-256 hash */
+async function uploadWasm(rpc, deployerKeypair, wasmPath) {
   if (!fs.existsSync(wasmPath)) {
-    console.error("❌ WASM not found at:", wasmPath);
-    process.exit(1);
+    throw new Error(`WASM file not found at: ${wasmPath}`);
   }
-
   const wasmBytes = fs.readFileSync(wasmPath);
-  console.log(`✅ Loaded WASM: ${wasmBytes.length} bytes`);
+  console.log(`📤 Uploading WASM: ${path.basename(wasmPath)} (${wasmBytes.length} bytes)...`);
 
-  // Compute wasm hash (SHA-256)
   const wasmHash = crypto.createHash("sha256").update(wasmBytes).digest();
-  console.log(`   WASM hash: ${wasmHash.toString("hex")}`);
-
-  // Generate deployer keypair
-  const deployerKeypair = Keypair.random();
-  console.log(`\n🔑 Deployer: ${deployerKeypair.publicKey()}`);
-
-  // Fund via Friendbot
-  console.log(`💰 Funding via Friendbot...`);
-  const fundRes = await fetch(
-    `https://friendbot.stellar.org?addr=${deployerKeypair.publicKey()}`
-  );
-  if (!fundRes.ok) {
-    const errText = await fundRes.text();
-    throw new Error("Friendbot failed: " + errText);
-  }
-  const fundData = await fundRes.json();
-  console.log(`✅ Funded! TX: ${fundData.id || fundData.hash || "(ok)"}`);
-  await sleep(4000);
-
-  const rpc = new RpcServer(RPC_URL);
-  const horizon = new Horizon.Server(HORIZON_URL);
-
-  // ── Step 1: Upload WASM ──────────────────────────────────────────────────────
-  console.log("\n📤 Uploading WASM to Stellar Testnet...");
   const account = await rpc.getAccount(deployerKeypair.publicKey());
 
   const uploadTx = new TransactionBuilder(account, {
@@ -142,17 +109,17 @@ async function main() {
     throw new Error("Upload send failed: " + JSON.stringify(uploadSend.errorResult));
   }
 
-  // Use Horizon to confirm the upload TX
   await waitForHorizonTx(uploadSend.hash);
-  console.log("\n✅ WASM uploaded and confirmed on-chain!");
+  console.log(`✅ WASM ${path.basename(wasmPath)} uploaded and confirmed!`);
+  return wasmHash;
+}
 
-  // ── Step 2: Deploy Contract Instance ────────────────────────────────────────
-  console.log("\n🚀 Creating contract instance...");
-  await sleep(3000);
+/** Create contract instance and return its Contract ID */
+async function createContractInstance(rpc, deployerKeypair, wasmHash, salt) {
+  console.log(`🚀 Creating contract instance...`);
+  const account = await rpc.getAccount(deployerKeypair.publicKey());
 
-  const account2 = await rpc.getAccount(deployerKeypair.publicKey());
-
-  const deployTx = new TransactionBuilder(account2, {
+  const deployTx = new TransactionBuilder(account, {
     fee: "1000000",
     networkPassphrase: NETWORK_PASSPHRASE,
   })
@@ -160,7 +127,7 @@ async function main() {
       Operation.createCustomContract({
         address: new Address(deployerKeypair.publicKey()),
         wasmHash: wasmHash,
-        salt: Buffer.alloc(32, 0),
+        salt: salt,
       })
     )
     .setTimeout(300)
@@ -171,21 +138,19 @@ async function main() {
     throw new Error("Deploy simulation error: " + simDeploy.error);
   }
 
-  // Grab contract ID from simulation result (available before sending)
   let contractIdStrkey;
   try {
     const simResult = simDeploy;
     if (simResult.result && simResult.result.retval) {
       const retval = simResult.result.retval;
-      console.log("   Sim return type:", retval.switch().name);
       if (retval.switch().name === "scvAddress") {
         const contractIdBytes = retval.address().contractId();
         contractIdStrkey = StrKey.encodeContract(contractIdBytes);
-        console.log("   Contract ID (from sim):", contractIdStrkey);
+        console.log("   Contract ID (from simulation):", contractIdStrkey);
       }
     }
   } catch (e) {
-    console.log("   (Could not extract contract ID from sim, will try after TX)");
+    // Keep derivation deterministic as fallback
   }
 
   const preparedDeploy = assembleTransaction(deployTx, simDeploy).build();
@@ -198,18 +163,13 @@ async function main() {
     throw new Error("Deploy send failed: " + JSON.stringify(deploySend.errorResult));
   }
 
-  // Confirm via Horizon
   await waitForHorizonTx(deploySend.hash);
-  console.log("\n✅ Contract deployed and confirmed!");
 
-  // If we didn't get it from sim, derive it deterministically
   if (!contractIdStrkey) {
-    console.log("   Deriving contract ID deterministically...");
     const networkId = crypto
       .createHash("sha256")
       .update(NETWORK_PASSPHRASE)
       .digest();
-
     const deployerScAddress = new Address(deployerKeypair.publicKey()).toScAddress();
 
     const preimage = xdr.HashIdPreimage.envelopeTypeContractId(
@@ -219,7 +179,7 @@ async function main() {
           xdr.ContractIdPreimage.contractIdPreimageFromAddress(
             new xdr.ContractIdPreimageFromAddress({
               address: deployerScAddress,
-              salt: Buffer.alloc(32, 0),
+              salt: salt,
             })
           ),
       })
@@ -233,44 +193,186 @@ async function main() {
     contractIdStrkey = StrKey.encodeContract(contractIdBytes);
   }
 
-  console.log(`\n🎉 CONTRACT ID: ${contractIdStrkey}`);
+  console.log(`✅ Instance created: ${contractIdStrkey}`);
+  return contractIdStrkey;
+}
+
+/** Invoke a contract function */
+async function invokeContract(rpc, deployerKeypair, contractId, functionName, args) {
+  console.log(`✍️  Invoking ${functionName} on contract ${contractId}...`);
+  const account = await rpc.getAccount(deployerKeypair.publicKey());
+  const contract = new Contract(contractId);
+
+  const tx = new TransactionBuilder(account, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(functionName, ...args))
+    .setTimeout(300)
+    .build();
+
+  const sim = await rpc.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`Simulation error calling ${functionName} on ${contractId}: ` + sim.error);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(deployerKeypair);
+
+  const send = await rpc.sendTransaction(prepared);
+  console.log(`   TX hash: ${send.hash}`);
+
+  if (send.status === "ERROR") {
+    throw new Error(`Invocation failed: ` + JSON.stringify(send.errorResult));
+  }
+
+  await waitForHorizonTx(send.hash);
+  console.log(`✅ ${functionName} completed successfully!`);
+}
+
+async function main() {
+  console.log("🔨 Compiling workspace smart contracts to WASM...");
+  execSync("cargo build --target wasm32-unknown-unknown --release", { stdio: "inherit" });
+  console.log("✅ Smart contracts compiled.\n");
+
+  // Generate deployer keypair
+  const deployerKeypair = Keypair.random();
+  console.log(`🔑 Deployer Public Key: ${deployerKeypair.publicKey()}`);
+
+  // Fund via Friendbot
+  console.log(`💰 Funding deployer via Friendbot...`);
+  const fundRes = await fetch(
+    `https://friendbot.stellar.org?addr=${deployerKeypair.publicKey()}`
+  );
+  if (!fundRes.ok) {
+    const errText = await fundRes.text();
+    throw new Error("Friendbot failed: " + errText);
+  }
+  const fundData = await fundRes.json();
+  console.log(`✅ Funded! TX: ${fundData.id || fundData.hash || "(ok)"}`);
+  await sleep(4000);
+
+  const rpc = new RpcServer(RPC_URL);
+
+  // 1. Upload reward_token WASM & deploy instance
+  console.log("\n--- Deploying Reward Token Contract ---");
+  const rewardWasmHash = await uploadWasm(rpc, deployerKeypair, rewardWasmPath);
+  const rewardTokenSalt = Buffer.alloc(32, 1); // salt = 1 for reward token
+  const rewardTokenId = await createContractInstance(rpc, deployerKeypair, rewardWasmHash, rewardTokenSalt);
+
+  // 2. Upload crowdfund WASM & deploy instance
+  console.log("\n--- Deploying CrowdFund Contract ---");
+  const crowdfundWasmHash = await uploadWasm(rpc, deployerKeypair, crowdfundWasmPath);
+  const crowdfundSalt = Buffer.alloc(32, 0); // salt = 0 for crowdfund
+  const crowdfundId = await createContractInstance(rpc, deployerKeypair, crowdfundWasmHash, crowdfundSalt);
+
+  // 3. Initialize CrowdFund Contract (sets deployer as admin)
+  console.log("\n--- Initializing CrowdFund Contract ---");
+  await invokeContract(
+    rpc,
+    deployerKeypair,
+    crowdfundId,
+    "initialize",
+    [new Address(deployerKeypair.publicKey()).toScVal()]
+  );
+
+  // 4. Initialize Reward Token Contract (sets CrowdFund contract ID as admin, metadata)
+  console.log("\n--- Initializing Reward Token Contract ---");
+  await invokeContract(
+    rpc,
+    deployerKeypair,
+    rewardTokenId,
+    "initialize",
+    [
+      new Address(crowdfundId).toScVal(),
+      nativeToScVal("CrowdFund Reward"),
+      nativeToScVal("CRWD"),
+    ]
+  );
+
+  // 5. Set Reward Token ID in CrowdFund Contract
+  console.log("\n--- Connecting Reward Token to CrowdFund ---");
+  await invokeContract(
+    rpc,
+    deployerKeypair,
+    crowdfundId,
+    "set_reward_token",
+    [
+      new Address(deployerKeypair.publicKey()).toScVal(),
+      new Address(rewardTokenId).toScVal(),
+    ]
+  );
 
   // ── Update .env.local ────────────────────────────────────────────────────────
+  console.log("\n📝 Updating configuration files...");
   const envPath = path.join(__dirname, "..", ".env.local");
   let envContent = fs.readFileSync(envPath, "utf8");
-  envContent = envContent.replace(
-    /NEXT_PUBLIC_CROWDFUND_CONTRACT_ID=.*/,
-    `NEXT_PUBLIC_CROWDFUND_CONTRACT_ID=${contractIdStrkey}`
-  );
+
+  if (envContent.includes("NEXT_PUBLIC_CROWDFUND_CONTRACT_ID=")) {
+    envContent = envContent.replace(
+      /NEXT_PUBLIC_CROWDFUND_CONTRACT_ID=.*/,
+      `NEXT_PUBLIC_CROWDFUND_CONTRACT_ID=${crowdfundId}`
+    );
+  } else {
+    envContent = envContent.trimEnd() + `\nNEXT_PUBLIC_CROWDFUND_CONTRACT_ID=${crowdfundId}\n`;
+  }
+
+  if (envContent.includes("NEXT_PUBLIC_REWARD_TOKEN_CONTRACT_ID=")) {
+    envContent = envContent.replace(
+      /NEXT_PUBLIC_REWARD_TOKEN_CONTRACT_ID=.*/,
+      `NEXT_PUBLIC_REWARD_TOKEN_CONTRACT_ID=${rewardTokenId}`
+    );
+  } else {
+    envContent = envContent.trimEnd() + `\nNEXT_PUBLIC_REWARD_TOKEN_CONTRACT_ID=${rewardTokenId}\n`;
+  }
+
+  if (envContent.includes("NEXT_PUBLIC_DEPLOYER_ADDRESS=")) {
+    envContent = envContent.replace(
+      /NEXT_PUBLIC_DEPLOYER_ADDRESS=.*/,
+      `NEXT_PUBLIC_DEPLOYER_ADDRESS=${deployerKeypair.publicKey()}`
+    );
+  } else {
+    envContent = envContent.trimEnd() + `\nNEXT_PUBLIC_DEPLOYER_ADDRESS=${deployerKeypair.publicKey()}\n`;
+  }
+
   if (!envContent.includes("NEXT_PUBLIC_NATIVE_TOKEN_ADDRESS")) {
     envContent = envContent.trimEnd() + "\nNEXT_PUBLIC_NATIVE_TOKEN_ADDRESS=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC\n";
   }
+
   fs.writeFileSync(envPath, envContent);
   console.log(`✅ Updated .env.local`);
 
   // ── Update README.md ─────────────────────────────────────────────────────────
   const readmePath = path.join(__dirname, "..", "README.md");
   let readmeContent = fs.readFileSync(readmePath, "utf8");
+
   readmeContent = readmeContent.replace(
     /\| \*\*Contract ID\*\* \| .*\|/,
-    `| **Contract ID** | \`${contractIdStrkey}\` |`
+    `| **CrowdFund Contract ID** | \`${crowdfundId}\` |\n| **Reward Token Contract ID** | \`${rewardTokenId}\` |`
   );
+
   readmeContent = readmeContent.replace(
     /\[View Contract on Stellar Expert\]\([^)]+\)/,
-    `[View Contract on Stellar Expert](https://stellar.expert/explorer/testnet/contract/${contractIdStrkey})`
+    `[View Contract on Stellar Expert](https://stellar.expert/explorer/testnet/contract/${crowdfundId})`
   );
+
+  readmeContent = readmeContent.replace(
+    /\| \*\*Deployer Wallet Address\*\* \| .*\|/,
+    `| **Deployer Wallet Address** | \`${deployerKeypair.publicKey()}\` |`
+  );
+
   fs.writeFileSync(readmePath, readmeContent);
   console.log(`✅ Updated README.md`);
 
   console.log(`\n${"═".repeat(60)}`);
-  console.log(`CONTRACT ID : ${contractIdStrkey}`);
-  console.log(`EXPLORER    : https://stellar.expert/explorer/testnet/contract/${contractIdStrkey}`);
-  console.log(`UPLOAD TX   : ${uploadSend.hash}`);
-  console.log(`DEPLOY TX   : ${deploySend.hash}`);
+  console.log(`CROWDFUND CONTRACT ID  : ${crowdfundId}`);
+  console.log(`REWARD TOKEN ID        : ${rewardTokenId}`);
+  console.log(`DEPLOYER ADDRESS       : ${deployerKeypair.publicKey()}`);
+  console.log(`EXPLORER LINK          : https://stellar.expert/explorer/testnet/contract/${crowdfundId}`);
   console.log(`${"═".repeat(60)}\n`);
 }
 
 main().catch((err) => {
-  console.error("\n❌ Fatal error:", err.message || err);
+  console.error("\n❌ Fatal error during deployment:", err.message || err);
   process.exit(1);
 });

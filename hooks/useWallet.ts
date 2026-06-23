@@ -9,7 +9,7 @@ import {
   setActiveWallet,
   getConnectedAddress,
 } from "@/lib/stellar/wallet-kit";
-import { fetchXlmBalance } from "@/lib/stellar/contract";
+import { fetchXlmBalance, fetchRewardBalance } from "@/lib/stellar/contract";
 import { parseContractError } from "@/lib/utils";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -18,6 +18,16 @@ import { parseContractError } from "@/lib/utils";
 
 export function useWallet() {
   const store = useWalletStore();
+
+  /** Fetch both XLM and CRWD reward balances for an address */
+  const fetchAllBalances = useCallback(async (address: string) => {
+    const [balance, rewardBalance] = await Promise.allSettled([
+      fetchXlmBalance(address),
+      fetchRewardBalance(address),
+    ]);
+    if (balance.status === "fulfilled") store.setBalance(balance.value);
+    if (rewardBalance.status === "fulfilled") store.setRewardBalance(rewardBalance.value);
+  }, [store]);
 
   /** Open the wallet selection modal and connect */
   const connect = useCallback(async () => {
@@ -28,9 +38,8 @@ export function useWallet() {
       const { walletId, address } = await openWalletModal();
       store.setConnected(address, walletId);
 
-      // Fetch balance
-      const balance = await fetchXlmBalance(address);
-      store.setBalance(balance);
+      // Fetch XLM + CRWD reward balances in parallel
+      await fetchAllBalances(address);
     } catch (err) {
       const message = parseContractError(err);
       // Ignore "modal closed" errors
@@ -40,7 +49,7 @@ export function useWallet() {
         store.setConnecting(false);
       }
     }
-  }, [store]);
+  }, [store, fetchAllBalances]);
 
   /** Disconnect the current wallet */
   const disconnect = useCallback(async () => {
@@ -48,16 +57,15 @@ export function useWallet() {
     store.setDisconnected();
   }, [store]);
 
-  /** Refresh the XLM balance */
+  /** Refresh the XLM + CRWD balances */
   const refreshBalance = useCallback(async () => {
     if (!store.address) return;
     try {
-      const balance = await fetchXlmBalance(store.address);
-      store.setBalance(balance);
+      await fetchAllBalances(store.address);
     } catch {
       // Ignore balance fetch errors
     }
-  }, [store]);
+  }, [store, fetchAllBalances]);
 
   /** Restore wallet from persisted state on page load */
   const restoreWallet = useCallback(async () => {
@@ -68,8 +76,7 @@ export function useWallet() {
       const address = await getConnectedAddress();
 
       if (address && address === store.address) {
-        const balance = await fetchXlmBalance(address);
-        store.setBalance(balance);
+        await fetchAllBalances(address);
       } else {
         // Session expired, disconnect
         store.setDisconnected();
@@ -77,13 +84,14 @@ export function useWallet() {
     } catch {
       store.setDisconnected();
     }
-  }, [store]);
+  }, [store, fetchAllBalances]);
 
   return {
     // State
     isConnected: store.isConnected,
     address: store.address,
     balance: store.balance,
+    rewardBalance: store.rewardBalance,
     network: store.network,
     isConnecting: store.isConnecting,
     error: store.error,

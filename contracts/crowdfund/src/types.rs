@@ -11,6 +11,7 @@ pub enum DataKey {
     CampaignCount,
     Campaign(u32),
     Donations(u32),
+    RewardToken,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

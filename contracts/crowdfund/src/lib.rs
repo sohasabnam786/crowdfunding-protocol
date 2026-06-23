@@ -6,7 +6,7 @@ mod storage;
 mod error;
 
 use soroban_sdk::{
-    contract, contractimpl, token,
+    contract, contractimpl, contractclient, token,
     Address, Env, String, Vec,
 };
 
@@ -14,6 +14,17 @@ use types::{Campaign, Donation, CampaignStatus, DataKey};
 use error::CrowdfundError;
 
 pub use error::CrowdfundError as Error;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Inter-Contract Interface: Reward Token
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Client interface for the RewardToken contract.
+/// This enables cross-contract calls from CrowdfundContract → RewardTokenContract.
+#[contractclient(name = "RewardTokenClient")]
+pub trait RewardToken {
+    fn mint(env: Env, to: Address, amount: i128);
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Contract Entry Point
@@ -41,6 +52,48 @@ impl CrowdfundContract {
             .extend_ttl(100_000, 100_000);
 
         Ok(())
+    }
+
+    // ── Inter-Contract: Reward Token Configuration ────────────────────────────
+
+    /// Set the reward token contract address (admin-only).
+    ///
+    /// After this is set, every successful donation will automatically trigger
+    /// a cross-contract `mint` call on the reward token contract, crediting
+    /// the donor with 1 CRWD token per 1 stroop donated (1:1 ratio).
+    pub fn set_reward_token(
+        env: Env,
+        admin: Address,
+        token_address: Address,
+    ) -> Result<(), CrowdfundError> {
+        admin.require_auth();
+
+        // Verify caller is the stored admin
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(CrowdfundError::NotInitialized)?;
+
+        if stored_admin != admin {
+            return Err(CrowdfundError::Unauthorized);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardToken, &token_address);
+        env.storage()
+            .instance()
+            .extend_ttl(100_000, 100_000);
+
+        Ok(())
+    }
+
+    /// Get the current reward token contract address (if configured).
+    pub fn get_reward_token(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::RewardToken)
     }
 
     // ── Campaign Management ───────────────────────────────────────────────────
@@ -124,6 +177,11 @@ impl CrowdfundContract {
     ///
     /// The donor must have pre-approved the transfer via the token contract.
     /// We use the native XLM token (Stellar Asset Contract).
+    ///
+    /// If a reward token is configured via `set_reward_token`, the donor will
+    /// automatically receive CRWD reward tokens equal to the stroops donated
+    /// via a cross-contract mint call — demonstrating inter-contract
+    /// communication on Soroban.
     pub fn donate(
         env: Env,
         campaign_id: u32,
@@ -198,6 +256,20 @@ impl CrowdfundContract {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Donations(campaign_id), 100_000, 100_000);
+
+        // ── Inter-Contract Call: Mint Reward Tokens ───────────────────────────
+        // If a reward token contract is configured, mint CRWD reward tokens
+        // to the donor equal to the amount donated (1:1 stroop ratio).
+        // This demonstrates inter-contract communication on Soroban.
+        if let Some(reward_token_id) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::RewardToken)
+        {
+            let reward_client = RewardTokenClient::new(&env, &reward_token_id);
+            // Best-effort: if the reward contract call fails, do not revert the donation
+            let _ = reward_client.try_mint(&donor, &amount);
+        }
 
         // Emit event
         events::donation_made(&env, campaign_id, &donor, amount, campaign.raised);
@@ -289,7 +361,7 @@ impl CrowdfundContract {
         }
 
         // Find the donor's total donations
-        let mut donations: Vec<Donation> = env
+        let donations: Vec<Donation> = env
             .storage()
             .persistent()
             .get(&DataKey::Donations(campaign_id))
@@ -452,7 +524,7 @@ fn get_native_asset(env: &Env) -> Address {
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger, LedgerInfo},
+        testutils::Address as _,
         Address, Env, String,
     };
 
@@ -462,6 +534,15 @@ mod test {
         env
     }
 
+    fn setup_contract(env: &Env) -> (CrowdfundContractClient<'_>, Address) {
+        let contract_id = env.register_contract(None, CrowdfundContract);
+        let client = CrowdfundContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        client.initialize(&admin);
+        (client, admin)
+    }
+
+    // ── Test 1: Initialize ────────────────────────────────────────────────────
     #[test]
     fn test_initialize() {
         let env = create_env();
@@ -470,15 +551,23 @@ mod test {
         let admin = Address::generate(&env);
         client.initialize(&admin);
         assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_campaign_count(), 0u32);
     }
 
+    // ── Test 2: Double-initialize must fail ───────────────────────────────────
+    #[test]
+    fn test_double_initialize_fails() {
+        let env = create_env();
+        let (client, admin) = setup_contract(&env);
+        let result = client.try_initialize(&admin);
+        assert!(result.is_err());
+    }
+
+    // ── Test 3: Create campaign ───────────────────────────────────────────────
     #[test]
     fn test_create_campaign() {
         let env = create_env();
-        let contract_id = env.register_contract(None, CrowdfundContract);
-        let client = CrowdfundContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        client.initialize(&admin);
+        let (client, _admin) = setup_contract(&env);
 
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Save the Forest");
@@ -488,10 +577,93 @@ mod test {
 
         let id = client.create_campaign(&creator, &title, &description, &goal, &deadline);
         assert_eq!(id, 1u32);
+        assert_eq!(client.get_campaign_count(), 1u32);
 
         let campaign = client.get_campaign(&1u32);
         assert_eq!(campaign.creator, creator);
         assert_eq!(campaign.goal, goal);
         assert_eq!(campaign.raised, 0);
+        assert_eq!(campaign.status, CampaignStatus::Active);
+    }
+
+    // ── Test 4: Create campaign with invalid goal fails ───────────────────────
+    #[test]
+    fn test_create_campaign_invalid_goal_fails() {
+        let env = create_env();
+        let (client, _admin) = setup_contract(&env);
+        let creator = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86_400;
+        let result = client.try_create_campaign(
+            &creator,
+            &String::from_str(&env, "Bad"),
+            &String::from_str(&env, "Bad desc"),
+            &0_i128, // invalid goal
+            &deadline,
+        );
+        assert!(result.is_err());
+    }
+
+    // ── Test 5: Set reward token (admin-only) ─────────────────────────────────
+    #[test]
+    fn test_set_reward_token() {
+        let env = create_env();
+        let (client, admin) = setup_contract(&env);
+        let fake_token = Address::generate(&env);
+        client.set_reward_token(&admin, &fake_token);
+        assert_eq!(client.get_reward_token(), Some(fake_token));
+    }
+
+    // ── Test 6: Non-admin cannot set reward token ─────────────────────────────
+    #[test]
+    fn test_set_reward_token_unauthorized_fails() {
+        let env = create_env();
+        let (client, _admin) = setup_contract(&env);
+        let attacker = Address::generate(&env);
+        let fake_token = Address::generate(&env);
+        let result = client.try_set_reward_token(&attacker, &fake_token);
+        assert!(result.is_err());
+    }
+
+    // ── Test 7: Get campaigns (paginated) ─────────────────────────────────────
+    #[test]
+    fn test_get_campaigns_paginated() {
+        let env = create_env();
+        let (client, _admin) = setup_contract(&env);
+        let creator = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86_400;
+
+        // Create 3 campaigns
+        for i in 1u32..=3 {
+            let title = String::from_str(&env, "Campaign");
+            let desc = String::from_str(&env, "Description");
+            client.create_campaign(&creator, &title, &desc, &1_000_000_i128, &deadline);
+            assert_eq!(client.get_campaign_count(), i);
+        }
+
+        // Fetch with pagination
+        let page = client.get_campaigns(&1u32, &2u32);
+        assert_eq!(page.len(), 2);
+        let page2 = client.get_campaigns(&3u32, &2u32);
+        assert_eq!(page2.len(), 1);
+    }
+
+    // ── Test 8: Extend deadline ───────────────────────────────────────────────
+    #[test]
+    fn test_extend_deadline() {
+        let env = create_env();
+        let (client, _admin) = setup_contract(&env);
+        let creator = Address::generate(&env);
+        let original_deadline = env.ledger().timestamp() + 86_400;
+        client.create_campaign(
+            &creator,
+            &String::from_str(&env, "T"),
+            &String::from_str(&env, "D"),
+            &1_000_000_i128,
+            &original_deadline,
+        );
+        let new_deadline = original_deadline + 86_400;
+        client.extend_deadline(&1u32, &creator, &new_deadline);
+        let campaign = client.get_campaign(&1u32);
+        assert_eq!(campaign.deadline, new_deadline);
     }
 }

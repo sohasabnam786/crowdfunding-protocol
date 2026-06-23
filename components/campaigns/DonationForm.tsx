@@ -145,7 +145,7 @@ export function DonationForm({ campaign }: DonationFormProps) {
             <div>
               <p className="text-sm font-medium text-amber-400">Campaign Expired</p>
               <p className="text-xs text-amber-400/70 mt-0.5">
-                This campaign didn't reach its goal. Donors can request a full refund.
+                This campaign didn&apos;t reach its goal. Donors can request a full refund.
               </p>
             </div>
           </div>

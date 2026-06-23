@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["contracts/crowdfund"]
+members = ["contracts/crowdfund", "contracts/reward_token"]
 
 [profile.release]
 opt-level = "z"

@@ -1,10 +1,15 @@
 "use client";
 
-import { Zap, Heart, ArrowUpRight, RotateCcw, Loader2, Activity } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  Zap, Heart, ArrowUpRight, RotateCcw, Loader2, Activity,
+  Filter, Circle,
+} from "lucide-react";
 import { cn, shortAddress, formatXlm, formatRelativeTime, explorerTxUrl } from "@/lib/utils";
 import { useEvents } from "@/hooks/useEvents";
 import { useEventStore } from "@/store/event-store";
-import type { ContractEvent } from "@/types";
+import { EVENT_POLL_INTERVAL } from "@/lib/stellar/config";
+import type { ContractEvent, EventType } from "@/types";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Event Configuration
@@ -40,6 +45,60 @@ const EVENT_CONFIG: Record<
   },
 };
 
+// Filter options
+type FilterType = "all" | EventType;
+
+const FILTERS: { value: FilterType; label: string; color: string }[] = [
+  { value: "all",              label: "All",        color: "text-foreground" },
+  { value: "campaign_created", label: "Campaigns",  color: "text-violet-400" },
+  { value: "donation_made",    label: "Donations",  color: "text-emerald-400" },
+  { value: "funds_withdrawn",  label: "Withdrawals",color: "text-amber-400" },
+  { value: "refund_issued",    label: "Refunds",    color: "text-blue-400" },
+];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Live Countdown indicator
+// ──────────────────────────────────────────────────────────────────────────────
+
+function LiveCountdown() {
+  const [progress, setProgress] = useState(100);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startRef = useRef(Date.now());
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    intervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startRef.current;
+      const pct = Math.max(0, 100 - (elapsed / EVENT_POLL_INTERVAL) * 100);
+      setProgress(pct);
+      if (pct <= 0) {
+        startRef.current = Date.now();
+        setProgress(100);
+      }
+    }, 200);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  const circumference = 2 * Math.PI * 9; // r=9
+  const dash = (progress / 100) * circumference;
+
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" className="rotate-[-90deg]">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="hsl(var(--muted))" strokeWidth="2" />
+      <circle
+        cx="12" cy="12" r="9" fill="none"
+        stroke="hsl(var(--primary))" strokeWidth="2"
+        strokeDasharray={`${dash} ${circumference}`}
+        strokeLinecap="round"
+        style={{ transition: "stroke-dasharray 0.2s linear" }}
+      />
+    </svg>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Event Feed Component
 // ──────────────────────────────────────────────────────────────────────────────
@@ -52,32 +111,71 @@ interface EventFeedProps {
 export function EventFeed({ limit, showHeader = true }: EventFeedProps) {
   const { events: storeEvents } = useEventStore();
   const { events: queryEvents, isLoading, isPolling, refetch } = useEvents();
+  const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
   // Use store events (deduped & sorted) if available, otherwise query results
   const allEvents = storeEvents.length > 0 ? storeEvents : queryEvents;
-  const displayEvents = limit ? allEvents.slice(0, limit) : allEvents;
+
+  // Apply filter
+  const filteredEvents = activeFilter === "all"
+    ? allEvents
+    : allEvents.filter((e) => e.type === activeFilter);
+
+  const displayEvents = limit ? filteredEvents.slice(0, limit) : filteredEvents;
 
   return (
     <div className="flex flex-col gap-4">
       {showHeader && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="font-bold text-lg">Activity Feed</h2>
-            {isPolling && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
-                <div className="dot-active" />
+        <div className="space-y-4">
+          {/* Header row */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="font-bold text-lg">Activity Feed</h2>
+
+              {/* Live streaming indicator */}
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
+                <div className={cn("w-1.5 h-1.5 rounded-full bg-primary", isPolling && "animate-pulse")} />
                 <span className="text-xs text-primary font-medium">Live</span>
+                {isPolling && <LiveCountdown />}
               </div>
-            )}
+            </div>
+
+            <button
+              onClick={() => refetch()}
+              className="btn-ghost text-xs py-1.5 px-3"
+              aria-label="Refresh events"
+            >
+              {isPolling
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Activity className="w-3.5 h-3.5" />
+              }
+              Refresh
+            </button>
           </div>
-          <button
-            onClick={() => refetch()}
-            className="btn-ghost text-xs py-1.5 px-3"
-            aria-label="Refresh events"
-          >
-            <Activity className="w-3.5 h-3.5" />
-            Refresh
-          </button>
+
+          {/* Filter pills */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            {FILTERS.map(({ value, label, color }) => (
+              <button
+                key={value}
+                onClick={() => setActiveFilter(value)}
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-semibold border transition-all",
+                  activeFilter === value
+                    ? "bg-primary/15 border-primary/30 text-primary"
+                    : "bg-transparent border-white/[0.08] text-muted-foreground hover:border-white/20 hover:text-foreground"
+                )}
+              >
+                {label}
+                {value !== "all" && (
+                  <span className="ml-1.5 text-[10px] opacity-60">
+                    {allEvents.filter((e) => e.type === value).length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -97,9 +195,13 @@ export function EventFeed({ limit, showHeader = true }: EventFeedProps) {
             <Activity className="w-6 h-6 text-muted-foreground" />
           </div>
           <div>
-            <p className="font-semibold text-foreground/80">No events yet</p>
+            <p className="font-semibold text-foreground/80">
+              {activeFilter === "all" ? "No events yet" : `No ${activeFilter.replace("_", " ")} events`}
+            </p>
             <p className="text-sm text-muted-foreground mt-1">
-              Events will appear here when campaigns are created or donations are made
+              {activeFilter === "all"
+                ? "Events will appear here when campaigns are created or donations are made"
+                : "Try switching to a different filter"}
             </p>
           </div>
         </div>
