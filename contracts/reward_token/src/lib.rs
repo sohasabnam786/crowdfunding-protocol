@@ -196,7 +196,7 @@ mod test {
     fn setup() -> (Env, RewardTokenContractClient<'static>, Address) {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, RewardTokenContract);
+        let contract_id = env.register(RewardTokenContract, ());
         let client = RewardTokenContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         client.initialize(
