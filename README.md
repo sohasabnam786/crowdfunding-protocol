@@ -4,6 +4,8 @@ A **production-ready**, end-to-end decentralized crowdfunding dApp built with Ne
 
 🌐 **Live Deployment**: [https://crowdfunding-protocol.vercel.app/](https://crowdfunding-protocol.vercel.app/)
 
+🎥 **Demo Video**: [Watch the full demo here](https://drive.google.com/file/d/1t9iZlGCYl2JFV5Dq26SFXSKXlZHaRGZw/view?usp=drive_link)
+
 ---
 
 ## 📸 Screenshots
